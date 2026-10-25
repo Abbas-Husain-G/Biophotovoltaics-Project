@@ -19,3 +19,11 @@
 ## Tests
 - Solar position now validated against an independent Meeus reference at three sites (limit 0.02 deg; was a 0.6 deg comparison against the NOAA approximation).
 - `np.trapezoid` falls back to `np.trapz` on numpy < 2.
+
+## Real-data run (25 Oct 2026)
+- **Data**: PVGIS 5.3 TMY + PVcalc (42 files, PVGIS-ERA5) and Zenodo 5716091 workbooks fetched via browser (same URLs as `scripts/fetch_all_data.py`); see `data/MANIFEST.json`.
+- **Column map** (`data/zenodo_columns.json`): `Crop_type` labels map 1:1 to the nine Laub groups; location = `Reference` (study); the 89 RSR = 0 control rows are kept (`include_controls`). `run_phase45.load_dataset` accepts a list of location columns.
+- **Crop model form** (`cropfit.fit_lmm(quad=...)`, `run_phase45.QUAD`): with the real data the per-group quadratic passed only 6/11 gate values (fruity vegetables off by 0.37). Laub et al.'s published 20 %/40 % pairs imply one shared quadratic (about -0.72) for every group, i.e. the RSR^2 x group interaction was dropped by their backward elimination. The shared-quadratic model passes 11/11 (max |diff| 0.005 = rounding). Gate under all variants: `phase4_gate_variants.csv`; Wald test of equal quadratics logged in `phase45_log.txt` (it rejects equality without small-sample correction - reported as a caveat).
+- **PVGIS check** (`run_phase23`): adds in-plane irradiation and performance-ratio columns. Model is 1-6 % above PVcalc; irradiation agrees (-3.8..+0.2 %), the gap is PVGIS's larger temperature/low-light loss.
+- **Build** (`make_submission.py`): the LibreOffice helper path is found at run time instead of a hard-coded session path.
+- **Report/defence wording** rewritten for the real results (single LER tier, C2 best technically, C3 best economically, no AV beats PV-only at Rs 3.00, break-even tariffs, crop-income flips for tomato/onion, PVGIS optimism).

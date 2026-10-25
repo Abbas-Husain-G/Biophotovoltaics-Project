@@ -1,0 +1,6 @@
+{
+ "downloaded": "2026-10-25 22:55 IST",
+ "method": "PVGIS 5.3 API and Zenodo record fetched in a browser (same URLs as scripts/fetch_all_data.py)",
+ "pvgis_api": "https://re.jrc.ec.europa.eu/api/v5_3",
+ "zenodo_record": "10.5281/zenodo.5716091"
+}

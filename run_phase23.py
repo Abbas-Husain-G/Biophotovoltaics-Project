@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 from agripv.config import SITES, build_layouts, gross_factor, AUX_LAND_SHARE
 from agripv.geometry import cropped_mask
 from agripv.pv import (PVParams, sun_and_components, ground_irradiance, open_field_irradiance,
-                       pv_energy, kwp_per_ha)
+                       pv_energy, kwp_per_ha, poa_interior_row)
 from agripv.solarpos import solar_position
 
 DATA = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "data" / "pvgis"
@@ -97,9 +97,16 @@ def main():
         ey, ang = pvgis_value(state, tag)
         ey_opt, ang_opt = pvgis_value(state, "opt")
         if ey:
+            # split the difference into in-plane irradiation and conversion (performance ratio)
+            poa_open = poa_interior_row(build_layouts(float(tag))["REF"], sc, prm, shading=False)[1].sum() / 1000   # before reflection loss, like H(i)
+            tot = json.loads((DATA / f"pvcalc_{tag}_{state.replace(' ', '_')}.json").read_text())["outputs"]["totals"]["fixed"]
             check_rows.append(dict(state=state, tilt_deg=tag, ours_kwh_per_kwp=round(ours_open, 1),
                                    pvgis_kwh_per_kwp=round(ey, 1), diff_pct=round(100 * (ours_open / ey - 1), 2),
-                                   pvgis_optimal_tilt=ang_opt, our_optimal_tilt=tilt))
+                                   pvgis_optimal_tilt=ang_opt, our_optimal_tilt=tilt,
+                                   ours_poa_kwh_m2=round(poa_open, 1), pvgis_hi_kwh_m2=float(tot["H(i)_y"]),
+                                   poa_diff_pct=round(100 * (poa_open / float(tot["H(i)_y"]) - 1), 2),
+                                   ours_pr=round(ours_open / poa_open, 3), pvgis_pr=round(ey / float(tot["H(i)_y"]), 3),
+                                   pvgis_temp_lowirr_loss_pct=float(tot["l_tg"])))
 
         for cname in ("C1", "C2", "C3", "REF"):
             lay = lays[cname]

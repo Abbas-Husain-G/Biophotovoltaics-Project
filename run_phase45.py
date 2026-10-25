@@ -24,6 +24,8 @@ from agripv.config import gross_factor
 
 DATA = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "data"
 OUT = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "outputs"
+QUAD = "common"           # Laub et al.'s final model: group-specific linear RSR slopes, one RSR^2 term (backward
+                           # elimination removed the RSR^2 x crop-type interaction); see phase4_gate_variants.csv
 GATE_TOL = 0.05            # absolute tolerance on relative yield for reproducing published values
 UNCULTIVABLE = {"C1": 0.0, "C2": 0.0}   # posts/access under elevated layouts: base 0 %, scenario 5 % (M6)
 log_lines = []
@@ -45,21 +47,45 @@ def load_dataset():
     d = pd.DataFrame({"rsr": rsr, "y_pct": y_pct, "group": grp, "location": loc})
     n0 = len(d)
     d = d.dropna()
-    d = d[(d.rsr > 0) & (d.rsr <= 1) & (d.y_pct > 0)]
-    log(f"dataset: {n0} rows read, {len(d)} usable shaded observations (controls and incomplete rows dropped)")
+    keep_ctrl = bool(cfg.get("include_controls", False))
+    d = d[((d.rsr > 0) | (keep_ctrl & (d.rsr == 0))) & (d.rsr <= 1) & (d.y_pct > 0)]
+    log(f"dataset: {n0} rows read, {int((d.rsr > 0).sum())} usable shaded observations"
+        + (f" + {int((d.rsr == 0).sum())} unshaded controls (kept: they lie on the fixed origin)" if keep_ctrl else
+           " (controls and incomplete rows dropped)"))
     d["log_ratio"] = np.log10(d.y_pct) - 2
     return d
 
 
 def main():
     d = load_dataset()
-    res = fit_lmm(d.rsr, d.log_ratio, d.group, d.location)
-    log(f"REML converged: {res.converged}; sigma = {np.sqrt(res.sigma2):.4f}; G = {np.round(res.G, 4).tolist()}")
+    res = fit_lmm(d.rsr, d.log_ratio, d.group, d.location, quad=QUAD)
+    log(f"REML ({QUAD} quadratic) converged: {res.converged}; sigma = {np.sqrt(res.sigma2):.4f}; G = {np.round(res.G, 4).tolist()}")
+    sh = d[d.rsr > 0]          # counts and RSR range of the SHADED observations
     fit_rows = []
     for g in res.groups:
-        a, b = res.coef(g)
-        fit_rows.append(dict(group=g, a=a, b=b, n_obs=res.n_obs[g], n_locations=res.n_loc[g],
-                             rsr_min=res.rsr_range[g][0], rsr_max=res.rsr_range[g][1]))
+        a, b = res.coef(g); sg = sh[sh.group == g]
+        fit_rows.append(dict(group=g, a=a, b=b, n_obs=len(sg), n_locations=sg.location.nunique(),
+                             rsr_min=sg.rsr.min(), rsr_max=sg.rsr.max()))
+    # model-form evidence: Wald test that the group-specific RSR^2 terms are equal, and the gate under each variant
+    rg = fit_lmm(d.rsr, d.log_ratio, d.group, d.location, quad="group")
+    k = len(rg.groups); bq = rg.beta[1::2]; Cq = rg.cov_beta[1::2, 1::2]
+    R = np.hstack([-np.ones((k - 1, 1)), np.eye(k - 1)])
+    w = float((R @ bq) @ np.linalg.solve(R @ Cq @ R.T, R @ bq))
+    from scipy.stats import chi2
+    log(f"Wald test, equal RSR^2 terms across {k} groups: chi2 = {w:.2f}, df = {k - 1}, p = {chi2.sf(w, k - 1):.3f}")
+    var_rows = []
+    cfgc = json.loads((DATA / "zenodo_columns.json").read_text())
+    dfx = pd.read_excel(DATA / "zenodo" / cfgc["file"], sheet_name=cfgc["sheet"])
+    site = dfx[["Latitude", "Longitude"]].astype(str).agg("|".join, axis=1) if {"Latitude", "Longitude"} <= set(dfx) else None
+    for lname, locser in (("study (Reference)", d.location), ("site (lat-lon)", site.loc[d.index] if site is not None else None)):
+        if locser is None:
+            continue
+        for qv in ("common", "group"):
+            rv = rg if (qv == "group" and lname.startswith("study")) else fit_lmm(d.rsr, d.log_ratio, d.group, locser, quad=qv)
+            diffs = [abs(float(rv.predict(g, r)[0][0]) - pub) if g in rv.groups else np.nan for g, r, pub in LAUB_PUBLISHED]
+            var_rows.append(dict(location=lname, quadratic=qv, passed=int(np.sum(np.array(diffs) <= GATE_TOL)),
+                                 of=len(diffs), max_abs_diff=round(float(np.nanmax(diffs)), 3), used=(qv == QUAD and lname.startswith("study"))))
+    pd.DataFrame(var_rows).to_csv(OUT / "phase4_gate_variants.csv", index=False)
     pd.DataFrame(fit_rows).to_csv(OUT / "phase4_fit.csv", index=False)
     # curves for the figures (fitted mean, 95 % confidence and prediction bands) and the data actually used
     rr = np.linspace(0, 0.8, 81); crow = []

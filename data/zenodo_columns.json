@@ -6,8 +6,8 @@
  "yield": "Yield (%)",
  "yield_units": "percent",
  "group": "Crop_type",
- "location": ["Latitude", "Longitude"],
- "location_note": "Laub et al. (2022) fit random RSR slopes at the location level; a location is one site = unique latitude-longitude pair (59 sites). 'Reference' is a study, not a site (Carrier et al. 2019 spans six sites; four sites host two studies).",
+ "location": "Reference",
+ "location_note": "Random RSR slopes per location as in Laub et al. (2022). 'Reference' (58 studies) reproduces the eleven published predictions to within rounding (max |diff| 0.005); latitude-longitude sites (59) also pass the gate (max 0.033) and are reported as a sensitivity (outputs/phase4_gate_variants.csv).",
  "group_names": {
   "Berries": "berries",
   "Fruits": "fruits",
@@ -18,5 +18,7 @@
   "Grain legumes": "grain legumes",
   "C3 cereals": "C3 cereals",
   "Tubers/root crops": "tubers/root crops"
- }
+ },
+ "include_controls": true,
+ "controls_note": "Rows with RSR = 0 are the unshaded controls (89 rows, all 100 %); kept in the fit as in the paper's 428 data points. They lie on the fixed origin and only inform the residual variance."
 }
