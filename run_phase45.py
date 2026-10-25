@@ -58,6 +58,14 @@ def main():
         fit_rows.append(dict(group=g, a=a, b=b, n_obs=res.n_obs[g], n_locations=res.n_loc[g],
                              rsr_min=res.rsr_range[g][0], rsr_max=res.rsr_range[g][1]))
     pd.DataFrame(fit_rows).to_csv(OUT / "phase4_fit.csv", index=False)
+    # curves for the figures (fitted mean, 95 % confidence and prediction bands) and the data actually used
+    rr = np.linspace(0, 0.8, 81); crow = []
+    for g in res.groups:
+        mu, clo, chi = res.predict(g, rr, "confidence"); _, plo, phi = res.predict(g, rr, "prediction")
+        crow += [dict(group=g, rsr=r_, mu=m_, ci_low=a_, ci_high=b_, pi_low=c_, pi_high=d_)
+                 for r_, m_, a_, b_, c_, d_ in zip(rr, mu, clo, chi, plo, phi)]
+    pd.DataFrame(crow).to_csv(OUT / "phase4_curves.csv", index=False)
+    d.to_csv(OUT / "phase4_dataset_used.csv", index=False)
 
     gate_rows = []
     for g, r, pub in LAUB_PUBLISHED:
@@ -108,6 +116,12 @@ def main():
                        energy_ratio=e.energy_ratio_vs_ref, mwh_per_ha=e.mwh_per_ha)
             if group and group in res.groups:
                 mu, lo, hi, ex = strip_yield(res, group, strip_rsr, "prediction")
+                # growing-window sensitivity (months are provisional): season extended by one month at the end
+                ext = months + [months[-1] % 12 + 1]
+                s2 = strips[(strips.state == state) & (strips.config == cfg) & strips.month.isin(ext) & strips.cropped]
+                a2 = s2.groupby("y_m").agg(g=("ground_kwh_m2", "sum"), o=("open_kwh_m2", "sum"))
+                mu_ext = strip_yield(res, group, (1 - a2.g / a2.o).to_numpy(), "prediction")[0]
+                row.update(yield_rel_window_plus1=round(mu_ext, 3))
                 row.update(yield_rel=round(mu, 3), yield_low=round(lo, 3), yield_high=round(hi, 3),
                            extrapolated_share=round(ex, 2), basis="group curve",
                            ler=round(mu * crop_share + e.energy_ratio_vs_ref, 3),
