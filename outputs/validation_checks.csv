@@ -1,11 +1,11 @@
 check,value,limit,pass
-"T1a PSA vs NOAA elevation, Jodhpur 2025, max |diff|",0.547725408598545,0.6,True
+"T1a PSA vs Meeus elevation, 3 sites, 2025, max |diff|",0.0054406327919585,0.02,True
 "T1b winter-solstice max elevation vs 90-lat-23.44, |diff|",0.0023473600261780803,0.05,True
-"T2 ground beam shadow: closed form vs ray cast, mean |diff| (boundary strips only)",0.0,0.005,True
+"T2 ground beam shadow: closed form vs ray cast, mean |diff| over all strips",0.0,0.005,True
 "T3 field-mean shaded fraction vs analytic min(w/p,1), max |diff|",0.00024239410080155455,0.001,True
 "T4 ground sky view factor: sampling vs crossed strings, max |diff|",8.25412036853379e-05,0.002,True
 "T5 module shaded fraction: formula vs ray cast, max |diff|",0.0002496937187447257,0.002,True
 "T6 module sky view, isolated row vs (1+cos b)/2, |diff|",1.0180574161466893e-07,0.0001,True
 "T7 beam energy closure (sun in front of modules), max relative error",0.00024119077807344428,0.002,True
 "T8 horizontal POA equals GHI, max |diff|",1.1368683772161603e-13,1e-06,True
-"T9 reference plant kWp/ha vs 823.7 (CTUIL), |diff|",0.01612328241344585,0.5,True
+"T9 reference plant GROSS kWp/ha vs 823.7 (CTUIL 3 acres/MW), |diff|",0.016123282413332163,0.5,True

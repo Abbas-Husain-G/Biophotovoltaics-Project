@@ -20,6 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from agripv.cropfit import fit_lmm, strip_yield
 from agripv.cases import CASES, LAUB_PUBLISHED, ANCHORS
+from agripv.config import gross_factor
 
 DATA = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "data"
 OUT = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else ROOT / "outputs"
@@ -71,8 +72,27 @@ def main():
     log(f"Phase 4 gate (reproduce published values within {GATE_TOL}): {'PASS' if gate_ok else 'FAIL'} "
         f"({int(gate.pass_.sum())}/{len(gate)})")
 
+    # Field-anchor check (never fitted): does the group curve's 95 % prediction band, evaluated over the
+    # anchor's reported shade range, contain the observed relative yield?
+    crop_group = {c[2]: c[5] for c in CASES if c[5]}
+    anc_rows = []
+    for crop, ry, rlo, rhi, note, src in ANCHORS:
+        g = crop_group.get(crop)
+        row = dict(crop=crop, observed_rel_yield=round(ry, 3), rsr_lo=rlo, rsr_hi=rhi, group=g or "none", note=note, source=src)
+        if g and g in res.groups and rlo is not None:
+            rr = np.linspace(rlo, rhi, 5) if rhi > rlo else np.array([rlo])
+            mu, lo, hi = res.predict(g, rr, "prediction")
+            row.update(curve_mid=round(float(mu.mean()), 3), band_low=round(float(lo.min()), 3),
+                       band_high=round(float(hi.max()), 3),
+                       within_band=bool(lo.min() <= ry <= hi.max()))
+        anc_rows.append(row)
+    anc = pd.DataFrame(anc_rows); anc.to_csv(OUT / "phase4_anchor_check.csv", index=False)
+    chk = anc.dropna(subset=["curve_mid"]) if "curve_mid" in anc else anc.iloc[0:0]
+    log(f"Field-anchor check: {int(chk.within_band.sum()) if len(chk) else 0}/{len(chk)} anchors inside the 95 % prediction band")
+
     strips = pd.read_csv(OUT / "phase2_ground_strips_monthly.csv")
     energy = pd.read_csv(OUT / "phase3_energy.csv")
+    gf = gross_factor()
     rows = []
     for cid, state, crop, season, months, group, grade in CASES:
         for cfg in ("C1", "C2", "C3"):
@@ -80,7 +100,8 @@ def main():
             agg = s.groupby("y_m").agg(g=("ground_kwh_m2", "sum"), o=("open_kwh_m2", "sum"))
             strip_rsr = (1 - agg.g / agg.o).to_numpy()
             crop_share_strip = strips[(strips.state == state) & (strips.config == cfg) & (strips.month == 1)].cropped.mean()
-            crop_share = crop_share_strip * (1 - UNCULTIVABLE.get(cfg, 0.0))
+            # cropped share of the GROSS hectare: row-field cropped share x (1 - aux land) x (1 - uncultivable)
+            crop_share = crop_share_strip * gf * (1 - UNCULTIVABLE.get(cfg, 0.0))
             e = energy[(energy.state == state) & (energy.config == cfg)].iloc[0]
             row = dict(case=cid, state=state, crop=crop, season=season, config=cfg, grade=grade, group=group or "none",
                        rsr_cropped_mean=round(float(strip_rsr.mean()), 3), cropped_share=round(crop_share, 3),
@@ -88,33 +109,39 @@ def main():
             if group and group in res.groups:
                 mu, lo, hi, ex = strip_yield(res, group, strip_rsr, "prediction")
                 row.update(yield_rel=round(mu, 3), yield_low=round(lo, 3), yield_high=round(hi, 3),
-                           extrapolated_share=round(ex, 2),
+                           extrapolated_share=round(ex, 2), basis="group curve",
                            ler=round(mu * crop_share + e.energy_ratio_vs_ref, 3),
                            ler_low=round(lo * crop_share + e.energy_ratio_vs_ref, 3),
                            ler_high=round(hi * crop_share + e.energy_ratio_vs_ref, 3))
             else:
-                anc = [a[1] for a in ANCHORS if a[0] == crop]
-                if anc:
-                    row.update(yield_rel=np.nan, yield_low=round(min(anc), 3), yield_high=round(max(anc), 3),
-                               extrapolated_share=np.nan, note="no group curve: field-anchor range only")
-                    row.update(ler_low=round(min(anc) * crop_share + e.energy_ratio_vs_ref, 3),
-                               ler_high=round(max(anc) * crop_share + e.energy_ratio_vs_ref, 3))
+                anc_v = [a[1] for a in ANCHORS if a[0] == crop]
+                if anc_v:
+                    # NOT layout-responsive: the same field range is used for C1, C2 and C3
+                    row.update(yield_low=round(min(anc_v), 3), yield_high=round(max(anc_v), 3),
+                               basis="field anchors only (not layout-responsive)",
+                               ler_low=round(min(anc_v) * crop_share + e.energy_ratio_vs_ref, 3),
+                               ler_high=round(max(anc_v) * crop_share + e.energy_ratio_vs_ref, 3))
+                else:
+                    row.update(basis="no curve and no anchor: not assessed")
             rows.append(row)
     tech = pd.DataFrame(rows)
     tech.to_csv(OUT / "phase4_case_yields.csv", index=False)
 
-    # technical ranking: by LER mid (or band midpoint); overlapping 95 % bands are ties
+    # Technical ranking, curve-based rows only (anchor-only rows do not respond to the layout, so ranking them
+    # alongside curve rows would not be like-for-like; they are reported separately). Rows whose 95 % band
+    # overlaps the tier leader's band share its tier.
     tech["ler_mid"] = tech[["ler_low", "ler_high"]].mean(axis=1)
-    tech = tech.sort_values("ler_mid", ascending=False).reset_index(drop=True)
+    ranked = tech[tech.basis == "group curve"].sort_values("ler_mid", ascending=False).reset_index(drop=True)
     tier, tiers, top_low = 1, [], None
-    for _, r in tech.iterrows():
-        if top_low is not None and r.ler_high < top_low:
-            tier += 1; top_low = r.ler_low
-        elif top_low is None:
+    for _, r in ranked.iterrows():
+        if top_low is None:
             top_low = r.ler_low
+        elif r.ler_high < top_low:
+            tier += 1; top_low = r.ler_low
         tiers.append(tier)
-    tech["tier"] = tiers
-    tech.to_csv(OUT / "phase5_technical.csv", index=False)
+    ranked["tier"] = tiers
+    other = tech[tech.basis != "group curve"].assign(tier=np.nan)
+    pd.concat([ranked, other], ignore_index=True).to_csv(OUT / "phase5_technical.csv", index=False)
     (OUT / "phase45_log.txt").write_text("\n".join(log_lines))
     log("written outputs")
 

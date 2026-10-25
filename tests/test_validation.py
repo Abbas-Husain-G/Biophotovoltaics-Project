@@ -9,7 +9,7 @@ from agripv.geometry import (Layout, sun_t, strip_centres, ground_shade, ground_
                              module_beam_shaded_fraction, module_beam_shaded_fraction_raycast,
                              module_sky_view)
 from agripv.pv import PVParams, poa_interior_row, kwp_per_ha
-from agripv.config import build_layouts
+from agripv.config import build_layouts, gross_factor
 
 results = []
 def check(name, value, limit, unit=""):
@@ -22,19 +22,29 @@ LAYS = [Layout.from_gcr("g20", 22, 2.28, 0.20, 3.0), Layout.from_gcr("g30", 22, 
         Layout.from_gcr("g30low", 25, 2.28, 0.30, 0.5), Layout.from_gcr("g45", 30, 2.0, 0.45, 1.0)]
 
 # T1 solar position ----------------------------------------------------------
-def noaa(times, lat, lon):
-    tu = times.tz_convert("UTC"); day = tu.dayofyear.to_numpy(); hr = tu.hour.to_numpy() + tu.minute.to_numpy() / 60
-    g = 2 * np.pi / 365 * (day - 1 + (hr - 12) / 24)
-    eq = 229.18 * (0.000075 + 0.001868 * np.cos(g) - 0.032077 * np.sin(g) - 0.014615 * np.cos(2 * g) - 0.040849 * np.sin(2 * g))
-    d = (0.006918 - 0.399912 * np.cos(g) + 0.070257 * np.sin(g) - 0.006758 * np.cos(2 * g) + 0.000907 * np.sin(2 * g)
-         - 0.002697 * np.cos(3 * g) + 0.00148 * np.sin(3 * g))
-    ha = np.radians((hr * 60 + eq + 4 * lon) / 4 - 180); la = np.radians(lat)
-    return np.degrees(np.arcsin(np.clip(np.sin(la) * np.sin(d) + np.cos(la) * np.cos(d) * np.cos(ha), -1, 1)))
+def meeus(times, lat, lon):
+    """Independent reference: Meeus, Astronomical Algorithms (2nd ed.), ch. 12 (sidereal time) and
+    ch. 25 (low-accuracy solar coordinates, about 0.01 deg). Geometric elevation, no refraction."""
+    jd = times.tz_convert("UTC").to_julian_date().to_numpy(); T = (jd - 2451545.0) / 36525
+    L0 = 280.46646 + 36000.76983 * T + 0.0003032 * T ** 2
+    M = np.radians(357.52911 + 35999.05029 * T - 0.0001537 * T ** 2)
+    C = ((1.914602 - 0.004817 * T) * np.sin(M) + (0.019993 - 0.000101 * T) * np.sin(2 * M)
+         + 0.000289 * np.sin(3 * M))
+    om = np.radians(125.04 - 1934.136 * T)
+    lam = np.radians(L0 + C - 0.00569 - 0.00478 * np.sin(om))
+    eps = np.radians(23.439291 - 0.0130042 * T + 0.00256 * np.cos(om))
+    ra = np.arctan2(np.cos(eps) * np.sin(lam), np.cos(lam)); dec = np.arcsin(np.sin(eps) * np.sin(lam))
+    gmst = 280.46061837 + 360.98564736629 * (jd - 2451545) + 0.000387933 * T ** 2
+    H = np.radians(gmst + lon) - ra; la = np.radians(lat)
+    return np.degrees(np.arcsin(np.sin(la) * np.sin(dec) + np.cos(la) * np.cos(dec) * np.cos(H)))
 
 t = pd.date_range("2025-01-01", "2026-01-01", freq="20min", inclusive="left", tz="UTC")
-_, el, az = solar_position(t, 26.26, 73.02)
-up = el > 5
-check("T1a PSA vs NOAA elevation, Jodhpur 2025, max |diff|", np.abs(el - noaa(t, 26.26, 73.02))[up].max(), 0.6, " deg")
+worst = 0
+for la, lo in [(26.26, 73.02), (13.14, 78.13), (27.18, 78.01)]:
+    _, el, az = solar_position(t, la, lo)
+    up = el > 5
+    worst = max(worst, np.abs(el - meeus(t, la, lo))[up].max())
+check("T1a PSA vs Meeus elevation, 3 sites, 2025, max |diff|", worst, 0.02, " deg")
 t_noon = pd.date_range("2025-12-21 06:00", "2025-12-21 08:00", freq="1min", tz="UTC")
 _, el_n, _ = solar_position(t_noon, 26.26, 73.02)
 check("T1b winter-solstice max elevation vs 90-lat-23.44, |diff|", abs(el_n.max() - (90 - 26.26 - 23.44)), 0.05, " deg")
@@ -45,7 +55,7 @@ worst = 0
 for lay in LAYS:
     y = strip_centres(lay, 97)
     worst = max(worst, np.abs(ground_shade(lay, y, tt) - ground_shade_raycast(lay, y, tt)).mean())
-check("T2 ground beam shadow: closed form vs ray cast, mean |diff| (boundary strips only)", worst, 0.005)
+check("T2 ground beam shadow: closed form vs ray cast, mean |diff| over all strips", worst, 0.005)
 
 # T3 field-mean shaded fraction vs analytic min(w/p, 1) -----------------------
 worst = 0
@@ -101,7 +111,8 @@ check("T8 horizontal POA equals GHI, max |diff|", np.abs(poa - ghi).max(), 1e-6,
 
 # T9 reference plant density matches CTUIL 3 acres/MW ---------------------------
 lay = build_layouts(25)["REF"]
-check("T9 reference plant kWp/ha vs 823.7 (CTUIL), |diff|", abs(kwp_per_ha(lay, PVParams()) - 823.7), 0.5, " kWp/ha")
+check("T9 reference plant GROSS kWp/ha vs 823.7 (CTUIL 3 acres/MW), |diff|",
+      abs(kwp_per_ha(lay, PVParams()) * gross_factor() - 823.7), 0.5, " kWp/ha")
 
 n_fail = sum(not r[3] for r in results)
 print(f"\n{len(results) - n_fail}/{len(results)} checks passed")

@@ -13,6 +13,8 @@ as shadow_y = y_point - z_point * t.
 from dataclasses import dataclass
 import numpy as np
 
+_trapz = getattr(np, "trapezoid", None) or np.trapz   # numpy >= 2 has trapezoid; older has trapz
+
 
 @dataclass(frozen=True)
 class Layout:
@@ -105,7 +107,7 @@ def ground_sky_view(lay: Layout, y, n_ang=20001):
     phi = np.linspace(-np.pi / 2 + 1e-6, np.pi / 2 - 1e-6, n_ang)
     blocked = ground_shade(lay, y, np.tan(phi))            # (n_ang, n_strips)
     w = np.cos(phi)[:, None] / 2.0
-    return 1.0 - np.trapezoid(blocked * w, phi, axis=0)
+    return 1.0 - _trapz(blocked * w, phi, axis=0)
 
 
 def ground_sky_view_crossed_strings(lay: Layout, y, k_range=400):

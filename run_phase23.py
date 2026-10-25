@@ -10,9 +10,10 @@ import pandas as pd
 
 ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from agripv.config import SITES, build_layouts
+from agripv.config import SITES, build_layouts, gross_factor, AUX_LAND_SHARE
 from agripv.geometry import cropped_mask
-from agripv.pv import PVParams, sun_and_components, ground_irradiance, pv_energy, kwp_per_ha
+from agripv.pv import (PVParams, sun_and_components, ground_irradiance, open_field_irradiance,
+                       pv_energy, kwp_per_ha)
 from agripv.solarpos import solar_position
 
 DATA = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "data" / "pvgis"
@@ -30,12 +31,15 @@ def load_tmy(state):
     rows = js["outputs"]["tmy_hourly"]
     df = pd.DataFrame(rows)
     raw_t = pd.to_datetime(df["time(UTC)"], format="%Y%m%d:%H%M", utc=True)
+    # drop 29 February BEFORE re-stamping (2025 has no 29 Feb, so re-stamping it would raise)
+    keep = ~((raw_t.dt.month == 2) & (raw_t.dt.day == 29))
+    df, raw_t = df[keep.values].reset_index(drop=True), raw_t[keep].reset_index(drop=True)
     # re-stamp every month onto a nominal non-leap year, keeping month/day/hour/minute
     nominal = pd.to_datetime(dict(year=2025, month=raw_t.dt.month, day=raw_t.dt.day,
                                   hour=raw_t.dt.hour, minute=raw_t.dt.minute), utc=True)
     w = pd.DataFrame({"ghi": df["G(h)"].values, "dni": df["Gb(n)"].values, "dhi": df["Gd(h)"].values,
                       "temp_air": df["T2m"].values, "wind": df["WS10m"].values}, index=pd.DatetimeIndex(nominal))
-    w = w[~((w.index.month == 2) & (w.index.day == 29))].sort_index()
+    w = w.sort_index()
     meta = js.get("inputs", {}).get("meteo_data", {})
     months = js.get("outputs", {}).get("months_selected", [])
     return w, meta, months
@@ -101,16 +105,19 @@ def main():
             lay = lays[cname]
             e = pv_energy(lay, w, sc, prm).sum()
             kwph = kwp_per_ha(lay, prm)
+            gf = gross_factor()
             energy_rows.append(dict(state=state, district=district, config=cname, tilt_deg=tilt, gcr=round(lay.gcr, 3),
                                     pitch_m=round(lay.pitch_m, 2), clearance_m=lay.clearance_m,
-                                    kwp_per_ha=round(kwph, 1), kwh_per_kwp=round(e, 1),
-                                    mwh_per_ha=round(e * kwph / 1000, 1),
-                                    energy_ratio_vs_ref=round(e * kwph / (e_ref * kwph_ref), 3)))
+                                    kwp_per_ha_row=round(kwph, 1), kwp_per_ha=round(kwph * gf, 1),
+                                    kwh_per_kwp=round(e, 1),
+                                    mwh_per_ha=round(e * kwph * gf / 1000, 1),          # per GROSS hectare
+                                    energy_ratio_vs_ref=round(e * kwph / (e_ref * kwph_ref), 4),
+                                    aux_land_share=AUX_LAND_SHARE))
             if cname == "REF":
                 continue
             y, g, svf = ground_irradiance(lay, sc, N_STRIPS)
             crop = cropped_mask(lay, y)
-            open_h = sc["ghi"]
+            open_h = open_field_irradiance(sc)      # model-consistent open-field reference
             month = w.index.month
             for sname, ms in SEASONS.items():
                 m = np.isin(month, ms)

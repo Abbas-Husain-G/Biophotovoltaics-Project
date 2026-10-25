@@ -21,7 +21,7 @@ import pandas as pd
 
 from .solarpos import solar_position, extraterrestrial_dni
 from .geometry import (Layout, sun_t, strip_centres, ground_shade, ground_sky_view,
-                       module_beam_shaded_fraction, module_sky_view, cropped_mask)
+                       module_beam_shaded_fraction, module_sky_view)
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,14 @@ def ground_irradiance(lay: Layout, sc: dict, n_strips=40):
     g = (beam_h + circ_h)[:, None] * lit + iso_h[:, None] * svf[None, :]
     g[~sc["up"], :] = iso_h[~sc["up"], None] * svf[None, :]
     return y, g, svf
+
+
+def open_field_irradiance(sc: dict):
+    """Unshaded horizontal irradiance built from the SAME components as ground_irradiance
+    (beam DNI cos z + diffuse DHI), so that an unobstructed strip has RSR = 0 exactly.
+    Using the file's GHI instead would turn any GHI/DNI/DHI closure error into apparent shade."""
+    cosz = np.where(sc["up"], np.cos(np.radians(sc["zen"])), 0.0)
+    return sc["dni"] * cosz + sc["dhi"]
 
 
 def poa_interior_row(lay: Layout, sc: dict, prm: PVParams, array_az=180.0, shading=True):
