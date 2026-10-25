@@ -9,7 +9,11 @@ COVER = sys.argv[3] if len(sys.argv) > 3 else None
 OUT, FIG, DOC = BUILD / "outputs", BUILD / "figures", BUILD / "docs"
 for d in (OUT, FIG, DOC):
     d.mkdir(parents=True, exist_ok=True)
-SOFFICE = "/root/.claude/skills/synced/f81dc59f-2391-412c-bc88-2fd298a83689_fec28d36-3e54-4c3a-a69c-3dcf686aeb46/docx/scripts/office/soffice.py"
+# LibreOffice wrapper from the docx skill if present (handles sandboxed environments), else plain soffice
+_helpers = [pathlib.Path("/mnt/skills/public/docx/scripts/office/soffice.py"),
+            *pathlib.Path("/root/.claude/skills").glob("**/docx/scripts/office/soffice.py")]
+_helper = next((p for p in _helpers if p.is_file()), None)
+SOFFICE_CMD = [sys.executable, str(_helper)] if _helper else [shutil.which("soffice") or "soffice"]
 
 
 def run(*args, cwd=ROOT):
@@ -31,7 +35,7 @@ run(*py, ROOT / "report" / "build_defence.py", OUT, BUILD / "defence_spec.json",
 run("node", ROOT / "report" / "render_docx.js", BUILD / "report_spec.json", DOC / "Agrivoltaics_India_Report.docx", cwd="/tmp")
 run("node", ROOT / "report" / "render_docx.js", BUILD / "defence_spec.json", DOC / "Defence_Brief.docx", cwd="/tmp")
 for f in ("Agrivoltaics_India_Report.docx", "Defence_Brief.docx"):
-    run(sys.executable, SOFFICE, "--headless", "--convert-to", "pdf", "--outdir", DOC, DOC / f, cwd=DOC)
+    run(*SOFFICE_CMD, "--headless", "--convert-to", "pdf", "--outdir", DOC, DOC / f, cwd=DOC)
 
 zpath = BUILD / "Agrivoltaics_India_Submission.zip"
 top = "Agrivoltaics_India_Submission"

@@ -1,0 +1,22 @@
+{
+ "file": "Data_Meta_Analysis_updated.xlsx",
+ "sheet": "Sheet1",
+ "rsr": "RSR (%)",
+ "rsr_units": "percent",
+ "yield": "Yield (%)",
+ "yield_units": "percent",
+ "group": "Crop_type",
+ "location": ["Latitude", "Longitude"],
+ "location_note": "Laub et al. (2022) fit random RSR slopes at the location level; a location is one site = unique latitude-longitude pair (59 sites). 'Reference' is a study, not a site (Carrier et al. 2019 spans six sites; four sites host two studies).",
+ "group_names": {
+  "Berries": "berries",
+  "Fruits": "fruits",
+  "Fruity vegetables": "fruity vegetables",
+  "Forages": "forages",
+  "Leafy vegetables": "leafy vegetables",
+  "Maize": "maize",
+  "Grain legumes": "grain legumes",
+  "C3 cereals": "C3 cereals",
+  "Tubers/root crops": "tubers/root crops"
+ }
+}

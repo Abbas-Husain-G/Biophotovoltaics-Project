@@ -39,7 +39,10 @@ def load_dataset():
     yld = pd.to_numeric(df[cfg["yield"]], errors="coerce")
     y_pct = yld if cfg["yield_units"] == "percent" else yld * 100
     grp = df[cfg["group"]].astype(str).map(cfg["group_names"])
-    d = pd.DataFrame({"rsr": rsr, "y_pct": y_pct, "group": grp, "location": df[cfg["location"]].astype(str)})
+    # location may be one column or a list of columns (e.g. latitude + longitude = one site)
+    loc_cols = cfg["location"] if isinstance(cfg["location"], list) else [cfg["location"]]
+    loc = df[loc_cols].astype(str).agg("|".join, axis=1)
+    d = pd.DataFrame({"rsr": rsr, "y_pct": y_pct, "group": grp, "location": loc})
     n0 = len(d)
     d = d.dropna()
     d = d[(d.rsr > 0) & (d.rsr <= 1) & (d.y_pct > 0)]
